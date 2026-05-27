@@ -551,9 +551,8 @@ void testTensor(
 
 As we can see, the generated kernel from the HAT JIT compiler for CUDA
 is extremely similar to the hand-written CUDA kernels for tensors.
-This translation is possible through the HAT dialect for Tensors.
 
-If readers want to play with this API, it is fully available on GitHub
+If readers want to play with the HAT tensor API, it is fully available on GitHub
 under the `hat/tensors/v2` branch.
 
 - [HAT Tensor Support](https://github.com/jjfumero/babylon/tree/hat/tensors/v2):
@@ -656,20 +655,28 @@ for each backend without requiring source-code changes, thus, achieving
 functional portability.
 
 But how is the `warp-size` recalculated? In this case, the value of the
-warp-size coded in HAT kernel is automatically calculated via a dialect node in
-the HAT GPU dialect.
+warp-size coded in HAT kernel is automatically calculated and inserted
+directly into the tree of the original code model. Currently, this
+is implemented as a new `Op` that is contained in dialect for tensors
+within the HAT code transformer.
 
-For instance:
+A dialect is a domain specific code model without modifying the core 
+Java code models. It can be seen as an extension for a specific 
+domain of applications, in our case, for tensors. 
+
+A detailed discussion of tensor dialects is beyond the scope of 
+this article; however, we may cover this topic in a dedicated 
+article in the future.
+
+Thus, for instance, for the following kernel code that access
+the warp size:
 
 ```java
-final int WMMA_M = 16;
-final int WMMA_N = 16;
-final int WMMA_K = 16;
 int warpM = kc.gix / kc.wrs; // warp-size usage 1st dim
 int warpN = kc.giy;
 ```
 
-`kc.wrs` becomes a constant value of 32 during code specialization when
+the `kc.wrs` becomes a constant value of 32 during code specialization when
 compiling for NVIDIA architectures. In the case of OpenCL, we might choose
 a value of 1, or any other value that matches the current architecture in which
 the kernel will be deployed.
