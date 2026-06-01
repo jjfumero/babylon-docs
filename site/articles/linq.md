@@ -168,7 +168,7 @@ customer is located in the city of London, as follows.
 ```java
 @Reflect
 Predicate<Customer> p = c -> c.city.equals("London");
-Optional<JavaOp.LambdaOp> q = Op.ofLambda(p);
+Optional<Quoted<JavaOp.LambdaOp>> q = Op.ofLambda(p);
 JavaOp.LambdaOp pcm = q.orElseThrow().op();
 ```
 [//]: # (@formatter:on)
@@ -180,18 +180,16 @@ those values from the quoted instance.
 
 The code model of `p` is represented as an instance of `JavaOp.LambdaOp`
 corresponding to a *lambda expression* operation that models a lambda
-expression. Since quoting is potentially not limited to just the quoting of
-lambda expressions we first obtain the code model as an instance
-of `java.incubator.code.Op`, the top-level type for all operations, from
-which we then down cast.
+expression.
 
 ### Explaining the code model
 
 A code model is a tree containing operations, bodies, and blocks. An operation
 contains zero or more bodies. A body contains one or more blocks. A block
 contains a sequence of one or more operations. A block can declare zero or more
-block parameters, values. An operation declares an operation result, a value. An
-operation may use values as operands, but only after they have been declared.
+block parameters, values. A non-root operation declares an operation result, a
+value. An operation may use values as operands, but only after they have been
+declared.
 
 Using this simple tree structure we can define operations that model many Java
 language constructs, and therefore we can build code models that model many Java
@@ -224,24 +222,22 @@ Which prints the following text.
 };
 ```
 
-The textual form shows the code model's root is a lambda expression (`lambda`)
-operation. The lambda expression operation has an operation result, like all
-other operations, but since it's the root of the tree there is no need to
-present it.
+The textual form shows the code model is a lambda expression (`lambda`)
+operation and its result has a type that is the lambda's functional interface.
 
 The lambda-like expression represents the fusion of the lambda expression
 operation's single body and the body's first and only block, called the entry
 block. Then there is a sequence of operations in the entry block. For each
 operation there is an instance of a corresponding class present in the in-memory
-form, all of which extend from the abstract class `java.incubator.code.Op`.
+form, all of which extend from the abstract class `jdk.incubator.code.Op`.
 
 The entry block has one block parameters, `%1` (corresponding to `c`), described
 by a type of `linq.TestLinq$Customer`, which models `p`'s parameter. This
 parameter is used as an operand of another operation. Many operations produce
 operation results, e.g., `%4` the result of a field load operation, that are
 used as operands of subsequent operations, and so on. The `return`
-operation has a result, again like all other operations, but since that result
-cannot be meaningfully used we don't present it.
+operation has a result, again like all other non-root operations, but since that
+result cannot be meaningfully used we don't present it.
 
 Code models have the property of Static Single-Assignment (SSA). We refer to
 variables that can only be assigned once as values (they are a bit like final
@@ -447,15 +443,15 @@ private Queryable<?> insertQuery(JavaType elementType, String methodName, JavaOp
     FuncOp queryExpression = expression();
     JavaType queryableType = parameterized(Queryable.TYPE, elementType);
     FuncOp nextQueryExpression = func("query",
-            functionType(queryableType, queryExpression.invokableType().parameterTypes()))
+            functionType(queryableType, queryExpression.invokableSignature().parameterTypes()))
             .body(b -> Inliner.inline(b, queryExpression, b.parameters(), (block, query) -> {
-                Result fi = block.op(lambdaOp);
+                Result fi = block.add(lambdaOp);
 
                 MethodRef md = method(Queryable.TYPE, methodName,
                         functionType(Queryable.TYPE, ((ClassType) lambdaOp.functionalInterface()).rawType()));
-                Result queryable = block.op(JavaOp.invoke(queryableType, md, query, fi));
+                Result queryable = block.add(JavaOp.invoke(queryableType, md, query, fi));
 
-                block.op(return_(queryable));
+                block.add(return_(queryable));
             }));
 
     return provider().createQuery(elementType, nextQueryExpression);

@@ -80,7 +80,7 @@ that do will enjoy using code reflection).
 A code model contains code elements, operations, bodies, and blocks, that form a
 tree. An operation contains zero or more bodies. A body contains one or more
 blocks. A block contains a sequence of one or more operations. A block can
-declare zero or more block parameters, values. An operation declares an
+declare zero or more block parameters, values. A non-root operation declares an
 operation result, a value. An operation may use values as operands, but only
 after they have been declared. A value has a type.
 
@@ -279,9 +279,8 @@ and which have already seen when we printed out the classes. Unsurprisingly the
 printed operations and printed operation classes occur in the same order since
 the `toText` method traverses the model in the same order as we traversed.
 
-> The function declaration operation has an operation result, like all other
-> operations, but since it's the root of the tree and not used we don't
-> present it.
+> Since the function declaration operation is a root it does not have an
+> operation result.
 
 The entry block has two block parameters, `%0` and `%1` each described by a type
 of `java.type:"double"`, which model method `sub`'s initial values for
@@ -307,8 +306,9 @@ operations. Likewise, subsequent operations also produce results, e.g., `%6` the
 result of a subtraction operation, that is used as an operand of the
 `return` operation.
 
-> The `return` operation has a result, again like all other operations, but
-> since that result cannot be meaningfully used we don't present it by default.
+> The `return` operation has a result, again like all other non-root operations,
+> but since that result cannot be meaningfully used we don't present it by
+> default.
 
 Now let us consider a slightly more complex method, `distance1`, that computes a
 simple mathematical expression, the distance between two scalar values.
@@ -507,7 +507,7 @@ that _lowers_ such operations.
 
 [//]: # (@formatter:off)
 ```jshelllanguage
-CoreOp.FuncOp loweredModel = model.transform(OpTransformer.LOWERING_TRANSFORMER);
+CoreOp.FuncOp loweredModel = model.transform(CodeTransformer.LOWERING_TRANSFORMER);
 ```
 [//]: # (@formatter:on)
 
@@ -774,7 +774,7 @@ func @loc="71:5:file:///.../TestExpressionGraphs.java" @"distanceN"
 
 > Both the `java.for` operation and the `java.cexpression` operation
 > implement their own replacement. The corresponding operation classes
-> extend from `Op.Lowerable` interface, which declares an abstract method,
+> implement the `Op.Lowerable` interface, which declares an abstract method,
 > `lower`, that each operation implements.
 
 The `func` operation's body contains a control flow graph. Notice that
@@ -1108,8 +1108,8 @@ static Map<Value, Node<Value>> expressionGraphs(Body b) {
 ```
 
 > The switch statement is exhaustive and does not require a default clause.
-> `Body`, `Block`, and `Op` extend from the sealed abstract class
-> `CodeElement` which permits only those prior classes.
+> `Body`, `Block`, and `Op` implement the sealed interface `CodeElement` which
+> permits only those prior classes.
 
 This approach works because code elements are traversed in a specific order,
 where values are declared before they are used. Therefore, we don't need to

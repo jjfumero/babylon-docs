@@ -434,8 +434,9 @@ expression `Triton.add(block_start, range)`
 A code model is a tree containing operations, bodies, and blocks. An operation
 contains zero or more bodies. A body contains one or more blocks. A block
 contains a sequence of one or more operations. A block can declare zero or more
-block parameters, values. An operation declares an operation result, a value. An
-operation may use values as operands, but only after they have been declared.
+block parameters, values. A non-root operation declares an operation result, a
+value. An operation may use values as operands, but only after they have been
+declared.
 
 Using this simple tree structure we can define operations that model many Java
 language constructs, and therefore we can build code models that model many Java
@@ -512,22 +513,21 @@ func @loc="107:5:file:/.../TestAddKernel.java" @"add_kernel2"
 ```
 
 The textual form shows the code model's root is a function declaration (`func`)
-operation. The function declaration operation has an operation result, like all
-other operations, but since it's the root of the tree there is no need to
-present it.
+operation. Since the function declaration operation is a root it does not have
+an operation result.
 
 The lambda-like expression represents the fusion of the function declaration
 operation's single body and the body's first and only block, called the entry
 block. Then there is a sequence of operations in the entry block. For each
 operation there is an instance of a corresponding class present in the in-memory
-form, all of which extend from the abstract class `java.incubator.code.Op`.
+form, all of which extend from the abstract class `jdk.incubator.code.Op`.
 
 The entry block has four block parameters which model `add_kernel2`'s method
 parameters. These parameters are used as operands of various operations. Many
 operations produce operation results, e.g., `%15` the result of a multiplication
 operation, that are used as operands of subsequent operations, and so on.
-The `return` operation has a result, again like all other operations, but since
-that result cannot be meaningfully used we don't present it.
+The `return` operation has a result, again like all other non-root operations,
+but since that result cannot be meaningfully used we don't present it.
 
 Code models have the property of Static Single-Assignment (SSA). We refer to
 variables that can only be assigned once as values (they are a bit like final
@@ -553,10 +553,13 @@ type checking and attributing richer types to all the values declared in the
 Java code model.
 
 To do this we shall traverse the code model building a map of value to computed
-type (an instance of `Map<j.l.r.code.Value, j.l.r.code.TypeElement>`), that
-represents the result of attribution after traversal is complete. In effect the
-traversal performs an _abstract interpretation_ of the code. For each operation
+type (an instance of `Map<j.i.code.Value, j.i.code.CodeType>`), that represents
+the result of attribution after traversal is complete. In effect the traversal
+performs an _abstract interpretation_ of the code. For each operation
 encountered we will perform some type-based computation based on its semantics.
+
+> For presentation purposes in the above and other examples we abbreviate the
+> package `jdk.incubator.code` to `j.i.code`. 
 
 We first have to initialize (or seed) the map with the method's parameters and
 their richer types. Here is the test method for testing the vector addition
@@ -568,7 +571,7 @@ program's parameters.
 @TritonTestExtension.Kernel("add_kernel2")
 @Test
 public void test2(TritonTestData t) {
-    List<TypeElement> argTypes = List.of(
+    List<CodeType> argTypes = List.of(
             new PtrType(JavaType.FLOAT),
             new PtrType(JavaType.FLOAT),
             new PtrType(JavaType.FLOAT),
@@ -592,11 +595,10 @@ the (Python) Triton compiler. We have:
   of `Tensor`.
 
 These classes model Triton types, instances are Triton code model types
-extending from `TritonType` which in turn extends from `j.l.r.code.TypeElement`.
-The class `JavaType` models Java types, and similarly extends
-from `j.l.r.code.TypeElement`. Therefore, we can use pattern matching to operate
-on specific kinds of code model types, or alternatively we can uniformly operate
-on all code model types.
+extending from `TritonType` which in turn implements `j.i.code.CodeType`. The
+interface `JavaType` models Java types, and extends from `j.i.code.CodeType`.
+Therefore, we can use pattern matching to operate on specific kinds of code
+model types, or alternatively we can uniformly operate on all code model types.
 
 Triton types are not Java types i.e., they cannot be declared in Java programs
 as the types of variables. However, notice that Triton types can conveniently
@@ -726,7 +728,7 @@ Here's the builder implementation for the `Triton.arange` method:
 public Value arange(TensorType rType, Op.Result r,
                     ConstantType startType, Value start,
                     ConstantType endType, Value end) {
-    return block.op(TritonOps.makeRange(
+    return block.add(TritonOps.makeRange(
             (int) startType.value(),
             (int) endType.value()));
 }
@@ -735,7 +737,7 @@ public Value arange(TensorType rType, Op.Result r,
 We use the output block builder, `block`, to replace the invocation to
 `Triton.arange` with the Triton make range operation, whose result type is the
 same as `rType`. Note in this case we don't use `rType`, since the operation
-reconstructs an equivalent instance. Instances of `TypeElement` are value-based,
+reconstructs an equivalent instance. Instances of `CodeType` are value-based,
 so we could assert such equality e.g.,
 
 [//]: # (@formatter:off)
@@ -752,7 +754,7 @@ public Value load(TensorType rType, Op.Result r,
                   TensorType ptrType, Value ptr,
                   TensorType maskType, Value mask) {
     broadcastConversionRight(ptrType, maskType, mask);
-    return block.op(TritonOps.load(
+    return block.add(TritonOps.load(
             rType,
             block.context().getValue(ptr),
             block.context().getValue(mask)));

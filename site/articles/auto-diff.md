@@ -186,8 +186,9 @@ declaration.
 A code model is a tree containing operations, bodies, and blocks. An operation
 contains zero or more bodies. A body contains one or more blocks. A block
 contains a sequence of one or more operations. A block can declare zero or more
-block parameters, values. An operation declares an operation result, a value. An
-operation may use values as operands, but only after they have been declared.
+block parameters, values. A non-root operation declares an operation result, a
+value. An operation may use values as operands, but only after they have been
+declared.
 
 Using this simple tree structure we can define operations that model many Java
 language constructs, and therefore we can build code models that model many Java
@@ -229,9 +230,8 @@ func @loc="79:5:file:///.../TestForwardAutoDiff.java" @"f"
 ```
 
 The textual form shows the code model's root is a function declaration (`func`)
-operation. The function declaration operation has an operation result, like all
-other operations, but since it's the root of the tree there is no need to
-present it.
+operation. Since the function declaration operation is a root it does not have
+an operation result.
 
 The lambda-like expression represents the fusion of the function declaration
 operation's single body and the body's first and only block, called the entry
@@ -244,8 +244,9 @@ and `y`), each described by a type of `java.type:"double"`, which model `f`'s
 method parameters. These parameters are used as operands of various operations.
 Many operations produce operation results, e.g., `%12` the result of a
 multiplication operation, that are used as operands of subsequent operations,
-and so on. The `return` operation has a result, again like all other operations,
-but since that result cannot be meaningfully used we don't present it.
+and so on. The `return` operation has a result, again like all other non-root
+operations, but since that result cannot be meaningfully used we don't present
+it.
 
 Code models have the property of Static Single-Assignment (SSA). We refer to
 variables that can only be assigned once as values (they are a bit like final
@@ -439,7 +440,7 @@ FuncOp partialDiff() {
                     // so that it can be used when differentiating subsequent operations
                     diffValueMapping.put(op.result(), dor);
                 } else {
-                    block.op(op);
+                    block.add(op);
                 }
                 return block;
             });
@@ -449,9 +450,9 @@ FuncOp partialDiff() {
 
 void processBlocks(Block.Builder block) {
     // Declare constants at start
-    zero = block.op(constant(ind.type(), 0.0d));
+    zero = block.add(constant(ind.type(), 0.0d));
     // The differential of ind is 1
-    Value one = block.op(constant(ind.type(), 1.0d));
+    Value one = block.add(constant(ind.type(), 1.0d));
     diffValueMapping.put(ind, one);
 
     ...
@@ -486,7 +487,7 @@ Value diffOp(Block.Builder block, Op op) {
         ...
         case JavaOp.MulOp _ -> {
             // Copy input operation
-            block.op(op);
+            block.add(op);
 
             // Product rule
             // diff(l) * r + l * diff(r)
@@ -496,13 +497,13 @@ Value diffOp(Block.Builder block, Op op) {
             Value drhs = diffValueMapping.getOrDefault(rhs, zero);
             Value outputLhs = block.context().getValue(lhs);
             Value outputRhs = block.context().getValue(rhs);
-            yield block.op(JavaOp.add(
-                    block.op(JavaOp.mul(dlhs, outputRhs)),
-                    block.op(JavaOp.mul(outputLhs, drhs))));
+            yield block.add(JavaOp.add(
+                    block.add(JavaOp.mul(dlhs, outputRhs)),
+                    block.add(JavaOp.mul(outputLhs, drhs))));
         }
         ...
         case JavaOp.InvokeOp c -> {
-            MethodRef md = c.invokeDescriptor();
+            MethodRef md = c.invokeReference();
             String operationName = null;
             if (md.refType().equals(J_L_MATH)) {
                 operationName = md.name();
@@ -510,15 +511,15 @@ Value diffOp(Block.Builder block, Op op) {
             // Differentiate sin(x)
             if ("sin".equals(operationName)) {
                 // Copy input operation
-                block.op(op);
+                block.add(op);
 
                 // Chain rule
                 // cos(expr) * diff(expr)
                 Value a = op.operands().get(0);
                 Value da = diffValueMapping.getOrDefault(a, zero);
                 Value outputA = block.context().getValue(a);
-                Result cosx = block.op(JavaOp.invoke(J_L_MATH_COS, outputA));
-                yield block.op(JavaOp.mul(cosx, da));
+                Result cosx = block.add(JavaOp.invoke(J_L_MATH_COS, outputA));
+                yield block.add(JavaOp.mul(cosx, da));
             } else {
                 throw new UnsupportedOperationException("Operation not supported: " + op);
             }
