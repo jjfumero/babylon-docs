@@ -7,29 +7,37 @@
 ## Abstract
 
 Tensor Cores are dedicated hardware on NVIDIA GPUs that can be programmed to
-accelerate matrix-multiply-accumulate (mma) operations. Running operations on
-cores can increase performance of applications dramatically. However,
-NVIDIA tensor cores are only available for NVIDIA GPUs and exposed to the
-CUDA programming model through low-level APIs.
+accelerate matrix-multiply-accumulate (MMA) operations. Running MMA operations 
+on these cores can increase performance of specific applications dramatically. 
+However, NVIDIA tensor cores are only available for NVIDIA GPUs and exposed 
+to the CUDA programming model through low-level APIs.
 
+Ideally, we would also like to make those operations accessible from 
+Java to accelerate domain specific workloads (e.g., LLMs), but those 
+operations must be portable across devices.
 MMA capabilities are also available for other computing platforms
 such as Apple devices using the Metal programming model, or Intel XPUs via
 the OpenCL and oneAPI software stacks. However, these operations are not always 
 achievable for other programming models such as OpenCL 1.2 (the OpenCL version 
-that Apple supports), which motivates the need for abstractions
-and portability. This article tackles the architectural specificity of NVIDIA
-Tensor Cores by exploring a portable approach to tensor operations across
-multiple hardware accelerators.
+that Apple supports), which emphasizes the need for portability. 
+This article tackles the architectural specificity of NVIDIA Tensor Cores 
+by exploring a portable approach to tensor operations across multiple 
+hardware accelerators that can be used from Java.
 
-The goal is twofold. First, we show that HAT can reach close-to-native
-performance on hardware with accelerated MMA support, such as NVIDIA GPUs. Second, 
-we study how the same HAT Tensor API can remain portable across vendors and execution
+The goal of this article is twofold. First, we show that Java programs 
+can reach close-to-native performance for matrix-multiply computations
+on hardware with accelerated MMA support, such as NVIDIA GPUs. Second, 
+we study how the same Java Tensor API can remain portable across vendors and execution
 environments, both in source code and in runtime scheduling parameters
 such as warp size and tile size.
 
-Finally, this article evaluates the performance of the system using the Tensor
-Core APIs from Java in the context of two commodity GPU platforms, an Apple M4
-Max GPU and
+To support this approach, we extended the [Heterogeneous Accelerator Toolkit (HAT)](https://github.com/openjdk/babylon/tree/code-reflection/hat),
+a parallel programming framework to accelerate data-parallel workloads on hardware
+accelerators, with a tensor-aware API and a set of code transformations using the 
+code reflection API from the [OpenJDK Project Babylon](https://github.com/openjdk/babylon). 
+
+Finally, we evaluate the performance of the system using the Tensor Core APIs from 
+Java in the context of two commodity GPU platforms, an Apple M4 Max GPU and
 an [NVIDIA Ampere A10 GPU](https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a10/pdf/a10-datasheet.pdf).
 We show that, by enabling tensor cores on supported hardware (NVIDIA) we
 can speed up the naïve matrix multiplication from 240 GFLOP/s to 7.3 TFLOP/s,
@@ -42,7 +50,7 @@ model with an API for explicit tensor-core programming. Furthermore, it shows
 how to make this approach generic to be able to process computations expressed
 with the proposed HAT tensor core API on accelerators without explicit tensor
 instructions. While this article shows a complete approach, the final
-integration under the HAT programming model is under discussion.
+integration into the HAT programming model is under discussions.
 
 ## What are GPU Tensor Cores?
 
@@ -206,10 +214,8 @@ HMMA.16816.F32 R8, R12, R24, R8
 ```
 
 HMMA operations represent tensor core operations, as described in
-the [NVIDIA documentation]
-(https://docs.nvidia.com/cuda/ampere-tuning-guide/index.html#improved-tensor-core-operations).
-
-From the NCU profiler, we also see that the GEMM kernel from cuBLAS takes 0.05
+the [NVIDIA documentation](https://docs.nvidia.com/cuda/ampere-tuning-guide/index.html#improved-tensor-core-operations).
+Using the NCU profiler, we also see that the GEMM kernel from cuBLAS takes 0.05
 ms (line 9 in the Figure). Thus, this kernel performs 42x faster than the naïve
 matrix multiplication, and 6.5x times faster compared to the naïve version using
 Tensor Core operations for this input size on the NVIDIA A10 GPU.
@@ -325,7 +331,7 @@ follows:
 5. Loop over the tiles (from 0 to WMMA_K), and for each tile do:
 5.1     load tensorA from input matrix A
 5.2     load tensorB from input matrix B
-5.3     perform mma operation and store in accumulator
+5.3     perform the MMA operation and store in accumulator
 6. Store final result in resulting matrix C
 ```
 
@@ -353,7 +359,7 @@ Thus, we can end-up with the following strategy for HAT:
 2. For each of the tiles (from 0 to WMMA_K) do
 2.1   load tensorA from matrix A with specified shape
 2.2   load tensorB from matrix B with specified shape
-2.3   perform mma operation
+2.3   perform the MMA operation and store in accumulator
 3. Store final result in matrix C
 ```
 
