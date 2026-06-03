@@ -84,8 +84,8 @@ higher-precision format, such as FP32.
 
 #### But why is this set of operations important?
 
-Matrix-Multiply-Accumulate operations are widely used in many type of
-applications,
+Matrix-Multiply-Accumulate operations are widely used in many types of
+application,
 including AI and LLMs for training and inference, taking more than 80% of the
 total
 computation for upstream LLMs, as reported
