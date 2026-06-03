@@ -342,7 +342,7 @@ by exposing a default option (row-major) as it is also how Java operates by
 default. In case the HAT developer needs to access using column-major layout, we can pass
 a new parameter when we define (or load as we will see) the tensor.
 
-Another observation is that the tensors A and B can be directly declare when we
+Another observation is that the tensors A and B can be directly declared when we
 load the data from the input matrices. Besides, when we load, we can specify if we load
 into an FP16 tensor via different versions of the load operation.
 
