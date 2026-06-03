@@ -157,7 +157,7 @@ FMA (Fused Multiply-Add) operations per cycle, per SM!**
 **We, as CUDA/GPU programmers, can directly program the Tensor Core Unit via an
 API for performing fast MMA operations.**
 
-## How Fast can e Process MMA Operations with Tensor Cores?
+## How Fast can we Process MMA Operations with Tensor Cores?
 
 Let’s run an experiment. I am going to use an NVIDIA A10 GPU, and the CUDA code
 used has been adapted from the following article:
