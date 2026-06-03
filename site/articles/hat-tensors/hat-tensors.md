@@ -443,7 +443,7 @@ this operation into an explicit tile operation to perform an explicit mma
 operation as follows:
 
 ```java
-acc = add(dot(tensorA, tensorB, acc);
+acc = add(dot(tensorA, tensorB), acc);
 ```
 
 ### 3. Store final result in matrix C
