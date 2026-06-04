@@ -270,43 +270,48 @@ Let's start with how tensor cores can be programmed with CUDA using the WMMA
 API.
 
 ```c
-// Tile using a 2D grid
-int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
-int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
+__global__ void wmma_example(
+    half *a, half *b, float *c, 
+    int M, int N, int K) {
+    
+  // Tile using a 2D grid
+  int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
+  int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
 
-// Declare the fragments
-wmma::fragment<wmma::matrix_a, 
+  // Declare the fragments
+  wmma::fragment<wmma::matrix_a, 
               WMMA_M, WMMA_N, WMMA_K, 
               half, wmma::col_major> a_frag;
-wmma::fragment<wmma::matrix_b, 
+  wmma::fragment<wmma::matrix_b, 
                WMMA_M, WMMA_N, WMMA_K, 
                half, wmma::col_major> b_frag;
-wmma::fragment<wmma::accumulator, 
+  wmma::fragment<wmma::accumulator, 
                WMMA_M, WMMA_N, WMMA_K, 
                float> acc_frag;
-wmma::fill_fragment(acc_frag, 0.0f);
+  wmma::fill_fragment(acc_frag, 0.0f);
 
-// Loop over k
-for (int i = 0; i < K; i += WMMA_K) {
   int aRow = warpM * WMMA_M;
-  int aCol = i;
-  int bRow = i;
   int bCol = warpN * WMMA_N;
  
-  // Load the inputs
-  wmma::load_matrix_sync(a_frag, a + aRow + aCol * lda, lda);
-  wmma::load_matrix_sync(b_frag, b + bRow + bCol * ldb, ldb);
+  // Loop over the tiles
+  for (int i = 0; i < K && i < lda && i < ldc; i += WMMA_K) {
+    // Load the inputs
+    wmma::load_matrix_sync(a_frag, a + aRow + i * lda, lda);
+    wmma::load_matrix_sync(b_frag, b + i + bCol * ldb, ldb);
 
-  // Perform the matrix multiplication
-  wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
-}
+    // Perform the matrix multiplication
+    wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
+  }
 
-// Store the result     
-int cRow = warpM * WMMA_M;
-int cCol = warpN * WMMA_N;
-wmma::store_matrix_sync(c + cRow + cCol * ldc, 
+  // Store the result     
+  int cRow = warpM * WMMA_M;
+  int cCol = warpN * WMMA_N;
+  if (cRow < M && cCol < K) {
+    wmma::store_matrix_sync(c + cRow + cCol * ldc, 
                         acc_frag, ldc, 
                         wmma::mem_col_major);
+  }
+}
 ```
 
 This CUDA C++ API is a low-level API: It uses the `wmma` library, which 
@@ -460,6 +465,9 @@ Tensor.store(matrixC, cRow, cCol, acc, ldc);
 
 ### Complete Kernel Code in HAT
 
+Then following code snippet shows the complete HAT kernel with all the
+checks:
+
 ```java
 
 @Reflect
@@ -478,22 +486,23 @@ public static void mxmTensor(@RO KernelContext kc,
 
     var shape = Tensor.shape(WMMA_M, WMMA_N, WMMA_K);
     Tensor acc = Tensor.zeros(shape, float.class);
-    for (int i = 0; i < size; i += WMMA_K) {
-        int aRow = warpM * WMMA_M;
-        int aCol = i;
-        int bRow = i;
-        int bCol = warpN * WMMA_N;
-        if (aRow < lda && aCol < lda && bRow < ldb && bCol < ldb) {
-            Tensor tensorA = Tensor.loadF16(matrixA, aRow,
-                    aCol, lda, shape);
-            Tensor tensorB = Tensor.loadF16(matrixB, bRow,
-                    bCol, ldb, shape);
-            acc = Tensor.mma(tensorA, tensorB, acc);
-        }
+    int aRow = warpM * WMMA_M;
+    int bCol = warpN * WMMA_N;    
+    for (int i = 0; 
+        i < size && i < lda && i < ldb ; 
+        i += WMMA_K) 
+    {
+        Tensor tensorA = Tensor.loadF16(matrixA, aRow,
+                i, lda, shape);
+        Tensor tensorB = Tensor.loadF16(matrixB, i,
+                bCol, ldb, shape);
+        acc = Tensor.mma(tensorA, tensorB, acc);
     }
     int cRow = warpM * WMMA_M;
     int cCol = warpN * WMMA_N;
-    Tensor.store(matrixC, cRow, cCol, acc, ldc);
+    if (cRow < lda && cRow < ldc) {
+        Tensor.store(matrixC, cRow, cCol, acc, ldc);
+    }
 }
 ```
 
@@ -503,60 +512,55 @@ the following CUDA C++ kernel:
 ```java
 HAT_KERNEL
 
-void testTensor(
-        HAT_GLOBAL_MEM KernelContext_t*kc,
-        HAT_GLOBAL_MEM F16Array_t*matrixA,
-        HAT_GLOBAL_MEM F16Array_t*matrixB,
-        HAT_GLOBAL_MEM F32Array_t*matrixC,
-        int size
-) {
+HAT_KERNEL void mxmTensorsColumnMajor(
+    HAT_GLOBAL_MEM KernelContext_t* kc,
+    HAT_GLOBAL_MEM F16Array_t* matrixA,
+    HAT_GLOBAL_MEM F16Array_t* matrixB,
+    HAT_GLOBAL_MEM F32Array_t* matrixC,
+    int size
+){
     int SHAPE = 16;
     int WMMA_M = SHAPE;
     int WMMA_N = SHAPE;
     int WMMA_K = SHAPE;
-    int warpM = HAT_GIX / 32;
+    int warpM = HAT_GIX/32;
     int warpN = HAT_GIY;
     int lda = 1024;
     int ldb = 1024;
     int ldc = 1024;
-    nvcuda::wmma::fragment <
-            nvcuda::wmma::accumulator, 16, 16, 16,float>acc;
-    nvcuda::wmma::fill_fragment(acc, 0.0);
-    nvcuda::wmma::fragment <
-            nvcuda::wmma::matrix_a, 16, 16, 16, half,
-            nvcuda::wmma::col_major > tensorA;
-    nvcuda::wmma::fragment <
-            nvcuda::wmma::matrix_b, 16, 16, 16,
-            half, nvcuda::wmma::col_major > tensorB;
-    for (int i = 0; i < size; i = i + WMMA_K) {
-        int aRow = warpM * WMMA_M;
-        int aCol = i;
-        int bRow = i;
-        int bCol = warpN * WMMA_N;
-        if (aRow < lda && aCol < lda && bRow < ldb && bCol < ldb) {
-            nvcuda::wmma::load_matrix_sync(
-                    tensorA,
-                    (half *)matrixA -> array + aRow + (aCol * lda),
-                    lda);
-            nvcuda::wmma::load_matrix_sync(
-                    tensorB,
-                    (half *)matrixB -> array + bRow + (bCol * ldb),
-                    ldb);
-            nvcuda::wmma::mma_sync(acc, tensorA, tensorB, acc);
-        }
+    nvcuda::wmma::fragment<
+        nvcuda::wmma::accumulator, 16, 16, 16, float> acc;
+    nvcuda::wmma::fill_fragment(acc,0.0);
+    int aRow = warpM*WMMA_M;
+    int bCol = warpN*WMMA_N;
+    nvcuda::wmma::fragment<
+        nvcuda::wmma::matrix_a, 16, 16, 16, half,
+        nvcuda::wmma::col_major> tensorA;
+    nvcuda::wmma::fragment<
+        nvcuda::wmma::matrix_b, 16, 16, 16, half,
+        nvcuda::wmma::col_major> tensorB;
+    for(int i = 0; i<size && i<lda && i<ldb; i=i+WMMA_K){
+        nvcuda::wmma::load_matrix_sync(tensorA,
+            (half*)matrixA->array + aRow+(i*lda),lda);
+        nvcuda::wmma::load_matrix_sync(tensorB,
+            (half*)matrixB->array + i+(bCol*ldb),ldb);
+        nvcuda::wmma::mma_sync(acc,tensorA,tensorB,acc);
     }
-    int cRow = warpM * WMMA_M;
-    int cCol = warpN * WMMA_N;
-    nvcuda::wmma::store_matrix_sync(
-            matrixC -> array + cRow + (cCol * ldc),
-            acc, ldc,
+    int cRow = warpM*WMMA_M;
+    int cCol = warpN*WMMA_N;
+    if(cRow<lda && cCol<ldc){
+        nvcuda::wmma::store_matrix_sync(
+            matrixC->array + cRow+(cCol*ldc),
+            acc,
+            ldc,
             nvcuda::wmma::mem_col_major);
+    }
     return;
 }
 ```
 
 As we can see, the generated kernel from the HAT JIT compiler for CUDA
-is extremely similar to the hand-written CUDA kernels for tensors.
+is extremely similar to the handwritten CUDA kernels for tensors.
 
 If readers want to play with the HAT tensor API, it is fully available on GitHub
 under the `hat/tensors/v2` branch.
@@ -682,7 +686,7 @@ int warpM = kc.gix / kc.wrs; // warp-size usage 1st dim
 int warpN = kc.giy;
 ```
 
-the `kc.wrs` becomes a constant value of 32 during code specialization when
+The `kc.wrs` becomes a constant value of 32 during code specialization when
 compiling for NVIDIA architectures. In the case of OpenCL, we might choose
 a value of 1, or any other value that matches the current architecture in which
 the kernel will be deployed.
@@ -709,7 +713,7 @@ While this is a possible and a promising way to match tensor operations to other
 hardware, what we want initially is to keep a generic reference implementation in which
 we can guarantee that we can run the corresponding HAT programs with older
 hardware/support for OpenCL (e.g., OpenCL subgroups were promoted to core in
-OpenCL 2.1, but platforms such as MacOS and Apple Silicon only support OpenCL 1.2).
+OpenCL 2.1, but platforms such as Apple Silicon only support OpenCL 1.2).
 Note that OpenCL extensions may expose subgroups, even for older OpenCL
 versions. However, this is not the case of Apple OpenCL.
 
@@ -805,7 +809,7 @@ each platform:
 | Java Heap Size        | 16 GB                                                                                                                     | 16 GB                                                                                                                     |
 
 Note that the GPU A10 is running in an instance from Oracle Cloud (OCI).
-The instance is a paravirtualzed VM with 15 CPU cores assigned.
+The instance is a paravirtualized VM with 15 CPU cores assigned.
 
 The versions to be compared are: a) the Java parallel-streams running on the
 corresponding CPU system; b) the Java/HAT naïve matrix multiplication using
@@ -814,7 +818,7 @@ half) values, and d) the naïve matrix multiply implemented using the proposed
 Tensor API for HAT.
 
 We run each benchmark 100 times and collected the last 50 runs for the report.
-Furthermore, we set the Java heap size to 16GB. We also run the benchmark for
+Furthermore, we set the Java heap size to 16 GB. We also run the benchmark for
 four different sizes, ranging from 512x512 matrices to 4kx4k matrices. The
 following code snippet shows how this benchmark has been evaluated:
 
@@ -843,7 +847,7 @@ respectively, and the naïve matrix multiplication implemented using the HAT
 Tensor API. All these versions are compared to the Java parallel stream
 implementation evaluated on the Intel Xeon Platinum 8358 with 16 CPU cores.
 Furthermore, the following performance graph reports end-to-end time in peak
-performance (after warmup), including data transfers (copy data from the CPU to
+performance (after warm up), including data transfers (copy data from the CPU to
 the GPU, matrix-multiplication processing, and copy data from the GPU to the
 CPU).
 
