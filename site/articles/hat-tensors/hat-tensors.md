@@ -7,42 +7,46 @@
 ## Abstract
 
 Tensor Cores are dedicated hardware on NVIDIA GPUs that can be programmed to
-accelerate matrix-multiply-accumulate (MMA) operations. Running MMA operations 
-on these cores can increase performance of specific applications dramatically. 
-However, NVIDIA tensor cores are only available for NVIDIA GPUs and exposed 
+accelerate matrix-multiply-accumulate (MMA) operations. Running MMA operations
+on these cores can increase performance of specific applications dramatically.
+However, NVIDIA tensor cores are only available for NVIDIA GPUs and exposed
 to the CUDA programming model through low-level APIs.
 
-Ideally, we would also like to make those operations accessible from 
-Java to accelerate domain specific workloads (e.g., LLMs), but those 
+Ideally, we would also like to make those operations accessible from
+Java to accelerate domain-specific workloads (e.g., LLMs), but those
 operations must be portable across devices.
 MMA capabilities are also available for other computing platforms
 such as Apple devices using the Metal programming model, or Intel XPUs via
-the OpenCL and oneAPI software stacks. However, these operations are not always 
-achievable for other programming models such as OpenCL 1.2 (the OpenCL version 
-that Apple supports), which emphasizes the need for portability. 
-This article tackles the architectural specificity of NVIDIA Tensor Cores 
-by exploring a portable approach to tensor operations across multiple 
+the OpenCL and oneAPI software stacks. However, these operations are not always
+achievable for other programming models such as OpenCL 1.2 (the OpenCL version
+that Apple supports), which emphasizes the need for portability.
+This article tackles the architectural specificity of NVIDIA Tensor Cores
+by exploring a portable approach to tensor operations across multiple
 hardware accelerators that can be used from Java.
 
-The goal of this article is twofold. First, we show that Java programs 
+The goal of this article is twofold. First, we show that Java programs
 can reach close-to-native performance for matrix-multiply computations
-on hardware with accelerated MMA support, such as NVIDIA GPUs. Second, 
-we study how the same Java Tensor API can remain portable across vendors and execution
-environments, both in source code and in runtime scheduling parameters
-such as warp size and tile size.
+on hardware with accelerated MMA support, such as NVIDIA GPUs. Second,
+we study how the same Java Tensor API can be mapped across vendors while
+remaining portable in source code and runtime scheduling parameters
+such as warp and tile sizes.
 
-To support this approach, we extended the [Heterogeneous Accelerator Toolkit (HAT)](https://github.com/openjdk/babylon/tree/code-reflection/hat),
-a parallel programming framework to accelerate data-parallel workloads on hardware
-accelerators, with a tensor-aware API and a set of code transformations using the 
-code reflection API from the [OpenJDK Project Babylon](https://github.com/openjdk/babylon). 
+To support this approach, we extended
+the [Heterogeneous Accelerator Toolkit (HAT)](https://github.com/openjdk/babylon/tree/code-reflection/hat),
+a parallel programming framework to accelerate data-parallel workloads on
+hardware
+accelerators, with a tensor-aware API and a set of code transformations using
+the
+code reflection API from
+the [OpenJDK Project Babylon](https://github.com/openjdk/babylon).
 
-Finally, we evaluate the performance of the system using the Tensor Core APIs from 
+Finally, we evaluate the performance of the system using the HAT Tensor API from
 Java in the context of two commodity GPU platforms, an Apple M4 Max GPU and
 an [NVIDIA Ampere A10 GPU](https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a10/pdf/a10-datasheet.pdf).
 We show that, by enabling tensor cores on supported hardware (NVIDIA) we
-can speed up the naïve matrix multiplication from 240 GFLOP/s to 7.3 TFLOP/s,
+can speed up the naïve matrix multiplication kernel from 240 GFLOP/s to 7.3 TFLOP/s,
 while the application remains portable to run on Apple M4 GPU, in which, with
-some parameter tuning, we can even increase performance on Apple GPUs by 9x over
+some parameter tuning, we can even increase performance on Apple GPUs by 8x over
 the naïve matrix-multiplication.
 
 **Disclaimer**: this article shows an approach to extend the HAT programming
@@ -50,19 +54,18 @@ model with an API for explicit tensor-core programming. Furthermore, it shows
 how to make this approach generic to be able to process computations expressed
 with the proposed HAT tensor core API on accelerators without explicit tensor
 instructions. While this article shows a complete approach, the final
-integration into the HAT programming model is under discussions.
+integration into the HAT programming model is under discussion.
 
 ## What are GPU Tensor Cores?
 
-Tensor Cores are programmable matrix-multiply-accumulate (MMA) dedicated
-hardware that are present on GPUs since
-the
+Tensor Cores are programmable matrix multiply-accumulate (MMA) dedicated
+hardware that have been present on NVIDIA GPUs since the
 NVIDIA [Volta GPU microarchitecture](https://en.wikipedia.org/wiki/Volta_(microarchitecture)).
-These specialized units can help to increase performance of inference and training of
+These specialized units can improve training and inference performance for
 deep learning applications.
 
 The direct programmability of these units is exposed via APIs to the CUDA
-programming model, and can be also used from specific NVIDIA libraries such as
+programming model, and can also be used from specific NVIDIA libraries such as
 cuDNN and cuBLAS.
 
 While Tensor Cores are specific to the NVIDIA architecture, comparable MMA
@@ -74,13 +77,14 @@ as [the Intel oneAPI](https://www.intel.com/content/www/us/en/products/docs/acce
 
 Using
 the [NVIDIA terminology](https://www.nvidia.com/en-us/data-center/tensor-cores),
-a tensor
-operation is represented as a product and addition of small size matrices. The
-following diagram shows a representation of this operation in which three
-tensors of size 16x16 elements (represented as 2D matrices). The Tensor Cores
-can process hundreds of MMA operations in a single GPU clock cycle, leading to a
-performance increase. Note that NVIDIA tends to support larger MMA operations
-with each new GPU generation.
+a tensor operation is represented as a product and addition of small size
+matrices.
+The following diagram shows a representation of this operation in which three
+tensors of size 16x16 elements (represented as 2D matrices) are multiplied and 
+accumulated. The Tensor Cores can process hundreds/thousands of scalar FMA 
+operations in a single GPU clock cycle, leading to a performance increase. 
+Note that NVIDIA tends to support larger MMA operations with each new 
+GPU generation.
 
 <p align="center">
 <img src="./diagrams/tensor-logic.png" width="600"/>
@@ -92,11 +96,9 @@ higher-precision format, such as FP32.
 
 #### But why is this set of operations important?
 
-Matrix-Multiply-Accumulate operations are widely used in many types of
-application,
-including AI and LLMs for training and inference, taking more than 80% of the
-total
-computation for upstream LLMs, as reported
+Matrix multiply-accumulate operations are widely used in many types of
+applications, including AI and LLMs for training and inference, taking
+more than 80% of the total computation for upstream LLMs, as reported
 by [Modular](https://www.modular.com/blog/matrix-multiplication-on-nvidias-blackwell-part-1-introduction).
 Besides AI and LLMs, matrix-multiply is used for other types of applications
 such as scientific computing, graphics and data analytics, just to name a few.
@@ -107,9 +109,11 @@ In a way, Tensor Cores are equivalent to CPU vector units but for 2D-range
 operations, and specifically, for matrix-multiply operations. Thus, in hardware,
 GPUs implement a set of functional units to perform multiple MMA operations per
 GPU clock cycle. The number of functional units per GPU depends on the GPU
-generation and the GPU-tier (e.g., a GPU for a data center vs a consumer-grade GPU).
+generation and the GPU-tier (e.g., a GPU for a data center vs a consumer-grade
+GPU).
+
 To better understand where tensors are computed on GPUs, let’s look at the
-common organization of CUDA cores and Tensors cores on current NVIDIA GPU
+common organization of CUDA cores and Tensor Cores on current NVIDIA GPU
 architectures.
 
 <p align="center">
@@ -118,14 +122,16 @@ architectures.
 
 The diagram represents a processing block from the NVIDIA GPU
 architecture. It is composed of a so-called warp-scheduler (a warp on NVIDIA
-GPUs means a set of consecutive 32 threads that will run in a lockstep on the
-GPU cores). The warp scheduler can dispatch a warp per clock/cycle. **This is
-really a throughput machine.**
+GPUs means a set of consecutive 32 threads that will run in lockstep on the
+GPU cores. Although since the NVIDIA Volta microarchitecture, independent 
+thread-scheduling is also possible). The warp scheduler can dispatch a warp 
+per clock/cycle. **This is really a throughput machine.**
+
 
 Each processing block contains a large register file (for example, the NVIDIA
-B200 GPU contains more than 16k private registers. This is private space 
-for the CUDA threads that run inside the processing block). Furthermore, 
-the processing block contains a big set of functional units for computing 
+B200 GPU contains more than 16k private registers). This is private space
+for the CUDA threads that run inside the processing block. Furthermore,
+the processing block contains a big set of functional units for computing
 floating point operations in 32-bits, and
 integers of 32 bits. These represent the common CUDA cores that NVIDIA
 advertise. Each GPU tier and GPU generation varies in the number of CUDA cores
@@ -134,13 +140,13 @@ contains 32 CUDA cores for each processing block.
 
 Additionally, each processing block contains units for performing loads and
 stores, and a special functional unit (SFU), in which math operations such as
-`sqrt`, `exp`, etc., are processed. 
+`sqrt`, `exp`, etc., are processed.
 
 Finally, **each processing block contains a big unit for explicitly computing
 tensors**. The MMA tensor operation that we described previously will be
 executed in these units.
-NVIDIA GPUs do not provide just one processing blocks per GPU. They are, indeed,
-organized into larger processing structures called streaming multiprocessors 
+NVIDIA GPUs do not provide just one processing block per GPU. They are, indeed,
+organized into larger processing structures called streaming multiprocessors
 (SM). And, in the Blackwell microarchitecture, each SM contains four processing
 blocks as follows:
 
@@ -148,7 +154,7 @@ blocks as follows:
 <img src="./diagrams/sm-nvidia-blackwell.png" width="600"/>
 </p>
 
-Different GPU generations and different GPU tiers provide different number of
+Different GPU generations and different GPU tiers provide different numbers of
 SMs per GPU. To give you an example,
 the [NVIDIA B200 GPU](https://developer.nvidia.com/blog/inside-nvidia-blackwell-ultra-the-chip-powering-the-ai-factory-era/)
 contains up to 160 Streaming Multiprocessors (SMs), and each SM contains 4
@@ -160,51 +166,52 @@ of 2048
 FMA (Fused Multiply-Add) operations per cycle, per SM!**
 
 **We, as CUDA/GPU programmers, and hopefully, as Java developers too,
-can directly program the Tensor Core Unit via an API for performing 
+can directly program the Tensor Core Unit via an API for performing
 fast MMA operations.**
-
 
 ## How Fast can we Process MMA Operations with Tensor Cores?
 
 Let’s run an experiment. I am going to use an NVIDIA A10 GPU, and the CUDA code
-used has been adapted from an [article from NVIDIA](https://developer.nvidia.com/blog/programming-tensor-cores-cuda-9/).
+used has been adapted from
+an [article from NVIDIA](https://developer.nvidia.com/blog/programming-tensor-cores-cuda-9/).
 The cited article includes a comparison between explicit-use of Tensors using a
 naïve version of the matrix-multiplication with the tensor WMMA API, and
-compares this version against cuBLAS. While this experiment was written 
-for illustration purposes, it gives an idea about how the APIs are used.
+compares this version against the [`cublasGemmEx`](https://docs.nvidia.com/cuda/cublas/index.html#cublasgemmex)
+kernel from the cuBLAS library. While this experiment was written for 
+illustration purposes, it gives an idea about how the APIs are used.
 
 I slightly modified that example to also include the naïve matrix multiplication
 implemented in CUDA without tensors. This gives a better idea about the
-performance gains just by using CUDA Tensors. The source code can be found in
-the following link:
-https://github.com/jjfumero/cuda-tensor-samples/blob/main/tensorsExample.cu
+performance gains from using CUDA Tensors. The source code can be found in
+the following [link](https://github.com/jjfumero/cuda-tensor-samples/blob/main/tensorsExample.cu).
 
 Thus, now we have 3 versions in this example:
 
 1. A naïve matrix-multiplication implemented in CUDA.
 2. A naïve matrix-multiplication implemented in CUDA using the Tensor API (
-   wmma) in a column-major layout.
+   wmma) in a row-major layout.
 3. A library call to the NVIDIA cuBLAS for GEMM in FP16.
 
 Let’s analyze the performance of each implementation by using
-the [NVIDIA Nsight Compute Profiler (NCU)]( https://developer.nvidia.com/nsight-compute).
+the [NVIDIA Nsight Compute Profiler (NCU)](https://developer.nvidia.com/nsight-compute).
 The following Figure shows a screenshot of the CUDA NCU profiler for each of the
-kernels evaluated. What we are interested in the third column (kernel
-name), and fifth column (duration in ms) for each of the kernels.
+kernels evaluated. The relevant columns for us are the third column (kernel name) and
+the fifth column (duration in ms) for each kernel.
 
 <p align="center">
 <img src="./ncu-profilers/ncu-native-tensors.png" width="600"/>
 </p>
 
 As we can see, the naïve implementation (illustrated in row 6 from the Figure)
-takes 2.15 milliseconds to run a matrix-size of 1024x1024 elements. The naïve
+takes 2.15 milliseconds to run a matrix size of 1024x1024 elements. The naïve
 implementation using tensors (`wmma_example`) kernel illustrated in the profiler
-report in line 7 takes 0.33 milliseconds. This means a speedup of ~6.5x faster
+report in line 7 takes 0.33 milliseconds. This means a speedup of ~6.5x
 in kernel time, just by enabling tensor cores!
 
 And how do we know tensors are being used? When we look at the source section of
 the NCU profiler, we can identify the `mma` operations from the CUDA source and
-correlate with its SSA instructions. The SSA code looks as follows:
+correlate with its SASS (NVIDIA GPU assembly) instructions. 
+The SASS code looks as follows:
 
 ```asm
 HMMA.16816.F32 R4, R12, R22, R4
@@ -215,13 +222,14 @@ HMMA operations represent tensor core operations, as described in
 the [NVIDIA documentation](https://docs.nvidia.com/cuda/ampere-tuning-guide/index.html#improved-tensor-core-operations).
 Using the NCU profiler, we also see that the GEMM kernel from cuBLAS takes 0.05
 ms (line 9 in the Figure). Thus, this kernel performs 42x faster than the naïve
-matrix multiplication, and 6.5x times faster compared to the naïve version using
+matrix multiplication, and about 6.5x faster than the naïve version using
 Tensor Core operations for this input size on the NVIDIA A10 GPU.
 
 In terms of GFLOP/s, the naïve matmul kernel achieves ~1 TFLOP/s, while the
-naïve matmul with tensors enabled performs over 6.5 TFLOP/s and cuBLAS 42 TFLOP/s. 
-Note that the performance gap between `wmma` and cuBLAS is expected, since our tensor
-version [does not use GPU shared memory, 2D register tiling, or double buffering](https://siboehm.com/articles/22/CUDA-MMM).
+naïve matmul with tensors enabled performs over 6.5 TFLOP/s and cuBLAS reaches
+42 TFLOP/s. Note that the performance gap between `wmma` and cuBLAS is expected,
+since our tensor version
+[does not use GPU shared memory, 2D register tiling, or double buffering](https://siboehm.com/articles/22/CUDA-MMM).
 
 ## Enabling tensor core programming from Java with HAT and Babylon
 
@@ -248,9 +256,19 @@ static void mxmNaiveF16(KernelContext kc,
 }
 ```
 
-This matmul uses the `F16Array` data type, which is a predefined data type in
-the HAT API to operate with arrays of floating point values of 16 bits (
-`half-float`).
+This version of the matrix-multiplication for HAT already swaps `kc.gix` 
+and `kc.giy` for better memory coalescing, and it uses a 2D kernel 
+representation. 
+
+However, as we will show in the [evaluation section](#performance-evaluation), 
+although this kernel is faster than the Java multithreaded baseline, it remains
+significantly slower than native and more specialized GPU implementations.
+We can improve its performance by expressing the matrix multiply-accumulate
+operation through tensor computation. 
+
+We also see that this version of the matmul uses the `F16Array` data type, 
+which is a predefined data type in the HAT API to operate with arrays of 
+floating point values of 16 bits (`half-float`).
 This kernel is coded using a 2D-Range to access x,y coordinates of the matrix in
 parallel and map these thread-ids (namely `kc.gix` and `kc.giy`) with the
 corresponding data in the same positions.
@@ -267,71 +285,79 @@ and we have shaped the API to make it more friendly for Java programmers.
 Let's start with how tensor cores can be programmed with CUDA using the WMMA
 API.
 
-```c
-__global__ void wmma_example(
+```cpp
+#include <cuda_fp16.h>
+#include <mma.h>
+using namespace nvcuda;
+#define WMMA_M 16
+#define WMMA_N 16
+#define WMMA_K 16
+// A: MxK
+// B: KxN
+// C: MxN
+__global__ void cuda_tensors_row_major(
     half *a, half *b, float *c, 
     int M, int N, int K) {
-    
-  // Tile using a 2D grid
+  int lda = K;
+  int ldb = N;
+  int ldc = N;
   int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
   int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
 
-  // Declare the fragments (tensors)
+  // Declare the fragments
   wmma::fragment<wmma::matrix_a, 
-              WMMA_M, WMMA_N, WMMA_K, 
-              half, 
-              wmma::col_major> a_frag;
+                 WMMA_M, WMMA_N, WMMA_K, half, 
+                 wmma::row_major> a_frag;
   wmma::fragment<wmma::matrix_b, 
-               WMMA_M, WMMA_N, WMMA_K, 
-               half, 
-               wmma::col_major> b_frag;
+                WMMA_M, WMMA_N, WMMA_K, half, 
+                wmma::row_major> b_frag;
   wmma::fragment<wmma::accumulator, 
-               WMMA_M, WMMA_N, WMMA_K, 
-               float> acc_frag;
+                WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
   wmma::fill_fragment(acc_frag, 0.0f);
 
+  // Loop over the tiles
   int aRow = warpM * WMMA_M;
   int bCol = warpN * WMMA_N;
- 
-  // Loop over the tiles
-  for (int i = 0; i < K && i < lda && i < ldc; i += WMMA_K) {
+  for (int i = 0; 
+       aRow < M && bCol < N && i < K; 
+       i += WMMA_K) {
     // Load the inputs
-    wmma::load_matrix_sync(a_frag, a + aRow + i * lda, lda);
-    wmma::load_matrix_sync(b_frag, b + i + bCol * ldb, ldb);
+    wmma::load_matrix_sync(a_frag, a + i + aRow * lda, lda);
+    wmma::load_matrix_sync(b_frag, b + bCol + i * ldb, ldb);
 
     // Perform the matrix multiplication
     wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
   }
 
-  // Store the result     
   int cRow = warpM * WMMA_M;
   int cCol = warpN * WMMA_N;
-  if (cRow < M && cCol < K) {
-    wmma::store_matrix_sync(c + cRow + cCol * ldc, 
-                        acc_frag, ldc, 
-                        wmma::mem_col_major);
+  if (cRow < M && cCol < N) {
+    // Store the output
+    wmma::store_matrix_sync(c + cCol + cRow * ldc, 
+           acc_frag, ldc, wmma::mem_row_major);
   }
 }
 ```
 
-This CUDA C++ API is a low-level API: It uses the `wmma` library, which 
+This CUDA C++ API is a low-level API: It uses the `wmma` library, which
 stands for Warp Matrix Multiply Accumulate,
 and its operations are performed cooperatively by all threads in a warp.
 However, we can use the same core ideas as inspiration for the HAT Tensor API.
 
-In this CUDA example, fragments (tensors) are declared using a particular 
+In this CUDA example, fragments (tensors) are declared using a particular
 shape, type and memory access layout. In this case we use a shape of
-(16, 16, 16) and float-point of 16 bits (`half`). For the memory 
-access layout, we use column major (`col_major`). 
-The memory accessor layout relates with how data is stored in memory 
-from the input matrices (a and b). If the data is stored in column major,
+(16, 16, 16) and 16-bit floating point values (`half`). For the memory
+access layout, we use row major (`row_major`).
+The memory accessor layout describes how data is stored in memory
+for the input matrices (`a` and `b`). If the data is stored in column major,
 we need to define the corresponding tensors as `col_major`. Otherwise,
-we use `row_major`. 
+we use `row_major`.
 
-The previous code snippet runs a complete matrix multiplication, and it 
+The previous code snippet runs a complete matrix multiplication, and it
 assumes tiles and matrix dimensions are multiples of 16.
 Note that CUDA WMMA supports a limited set of tile shapes, with the supported
 shapes depending on the operand and accumulator types.
+
 - [NVIDIA Tensor Shapes](https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#element-types-and-matrix-sizes)
 
 The overall strategy to compute matrix-multiplication using tensors is as
@@ -350,25 +376,24 @@ follows:
 ```
 
 In CUDA, steps 1 and 2 also declare the access layout for each tensor from
-global memory. Furthermore, it tags whether the tensor will be used as 
+global memory. Furthermore, it tags whether the tensor will be used as
 first operand or second operand.
 These are low-level details that we can abstract in HAT.
 
 For the declaration of matrix A or B, we can derive it via runtime analysis
 with code-reflection.
 
-For the memory access layout, while we can make it explicit, we can facilitate the accessor
-by making a row-major layout the default option, as it is also how other programming models 
-and languages use by default, such as C, NumPy and Java. In case the HAT developer needs 
-to access using column-major layout, we can pass an extra parameter when we define the
-tensor (or load as we will see later).
+For the memory access layout, while we can make it explicit,
+we can facilitate the accessor by making a row-major layout the default
+option, as it is also how other programming models and languages use
+by default, such as C, NumPy and Java. In case the HAT developer needs
+to access using column-major layout, we can pass an extra parameter
+when we define the tensor (or load as we will see later).
 
 Another observation is that the tensors A and B can be directly declared when we
-load the data from the input matrices. Besides, when we load a tensor, 
-we can specify if we load will be operated in a `FP16` tensor or not 
-via different versions of the load operation.
-
-Thus, we can end-up with the following strategy for HAT:
+load the data from the input matrices. Besides, when we load a tensor,
+we can specify via a method call that we want to load a tensor in `FP16`.
+Thus, we can end up with the following strategy for HAT:
 
 ```bash
 1. Initialize the accumulator (e.g., 0.0f)
@@ -381,7 +406,8 @@ Thus, we can end-up with the following strategy for HAT:
 
 This way of programming is a bit more generic and facilitates code portability
 across different programming models and GPU vendors (e.g., by mapping
-this tensor API to explicit tile processing with OpenCL 1.2, as we will see in the
+this tensor API to explicit tile processing with OpenCL 1.2, as we will see in
+the
 next section).
 
 Note that WMMA fragments in CUDA are mutable objects. However, in our model,
@@ -389,13 +415,13 @@ we assume tensors are immutable, at least at the API level in HAT.
 While this eases programmability, the HAT runtime and compiler are still free to
 reorganize those operations to better match the underlying programming model
 (e.g., CUDA and OpenCL). As follows, we will explain the details of how HAT
-exposes these operations for Java programmers. 
+exposes these operations for Java programmers.
 
 ### 1. Declare Tensor Accumulator in HAT
 
 Tensor operations are defined in the `Tensor` class in HAT.
 The following code snippet shows how to create a tensor already initialized to
-`zeros`. Besides, it defines a common shape object to be used for the 
+`zeros`. Besides, it defines a common shape object to be used for the
 accumulator and load operations.
 
 ```java
@@ -405,24 +431,27 @@ var shape = Tensor.shape(sizeShape, sizeShape, sizeShape);
 Tensor acc = Tensor.zeros(shape, float.class);
 ```
 
-### 2. For each of the tiles (from 0 to num-tiles) 
+### 2. For each of the tiles (from 0 to num-tiles)
 
-Each thread iterates over the tiles. In our example, each tile is of size `WMMA_K`.
+Each thread iterates over the tiles. In our example, each tile is of size
+`WMMA_K`.
 Each tile loads the input data in tensors and performs the `mma` operation.
 
 ```java
-for (int i = 0; i < size; i += WMMA_K){
+final int WMMA_K = 16;
+for(int i = 0; i<size ; i += WMMA_K) {
    // load tensors
    // perform mma
 }
 ```
 
-Let's dive in into each of these operations.
+Let's dive into each of these operations.
 
 ### 2.1 Load tensorA from matrix A with specified shape
 
 To load a tensor, we use the `loadF16` method from the `Tensor` class.
 The parameters are defined as follows:
+
 - Input matrix.
 - Row to load
 - Column to load
@@ -434,15 +463,19 @@ Tensor tensorA = Tensor.loadF16(matrixA, aRow, i, lda, shape);
 ```
 
 If we do not specify the memory access layout, the HAT runtime and compiler will
-use row-major by default. This would mean that the input matrices are represented
-in memory using a row-major layout. If the Java programmer requires a column-major
-layout (because the input data is stored in such layout), we can pass an extra
+use row-major by default. This would mean that the input matrices are
+represented in memory using a row-major layout. If the Java programmer requires a
+column-major layout (because the input data is stored in such layout), we can pass an extra
 parameter to define the accessor as follows:
 
 ```java
 Tensor tensorA = Tensor.loadF16(matrixA, aRow, i, lda, shape,
         Tensor.ofColumnMajor());
 ```
+
+For the evaluation section, we will use this variant, column-major, 
+since it was the one we evaluated before for the CUDA C++ performance report 
+in the [previous section](#how-fast-can-we-process-mma-operations-with-tensor-cores).
 
 ### 2.2 Load tensorB from matrix B with specified shape
 
@@ -457,18 +490,18 @@ Tensor tensorB = Tensor.loadF16(matrixB, i, bCol, ldb, shape);
 Now we have everything ready to perform the MMA operation.
 
 ```java
-acc = Tensor.mma(tensorA, tensorB, acc);
+acc =Tensor.mma(tensorA, tensorB, acc);
 ```
 
 This operation performs `acc = tensorA * tensorB + acc`. If we run this code
-on a platform with tensor-core processing support, the HAT compiler maps 
+on a platform with tensor-core processing support, the HAT compiler maps
 these instructions to explicit `mma` tensor core instructions.
 Otherwise, as we will see in the following sections, the HAT compiler maps
-the mma operation into an explicit loop-tile operation that contains an 
+the mma operation into an explicit loop-tile operation that contains an
 explicit matrix-multiply and accumulate operation as follows:
 
 ```java
-acc = add(dot(tensorA, tensorB), acc);
+acc = add(dot(tensorA, tensorB),acc);
 ```
 
 ### 3. Store final result in matrix C
@@ -479,42 +512,45 @@ Tensor.store(matrixC, cRow, cCol, acc, ldc);
 
 ### Complete Kernel Code in HAT
 
-Then following code snippet shows the complete HAT kernel with all the
-checks:
+The following code snippet shows the complete HAT kernel to compute
+the matrix-multiplication using the proposed Tensor Core API.
 
 ```java
-
 @Reflect
-public static void mxmTensor(@RO KernelContext kc,
-                             @RO F16Array matrixA,
-                             @RO F16Array matrixB,
-                             @WO F32Array matrixC,
-                             int size) {
-    final int SHAPE = 16;
-    final int WMMA_M = SHAPE;
-    final int WMMA_N = SHAPE;
-    final int WMMA_K = SHAPE;
-
+public static void hatTensors(@RO KernelContext kc,
+                              @RO F16Array matrixA,
+                              @RO F16Array matrixB,
+                              @WO F32Array matrixC, 
+                              int size) {
+    final int shapeSize = 16;
+    final int WMMA_M = shapeSize;
+    final int WMMA_N = shapeSize;
+    final int WMMA_K = shapeSize;
     int warpM = kc.gix / kc.wrs;
     int warpN = kc.giy;
 
+    // multiply square matrices
+    final int lda = size;
+    final int ldb = size;
+    final int ldc = size;
+
     var shape = Tensor.shape(WMMA_M, WMMA_N, WMMA_K);
     Tensor acc = Tensor.zeros(shape, float.class);
+
     int aRow = warpM * WMMA_M;
-    int bCol = warpN * WMMA_N;    
-    for (int i = 0; 
-        i < size && i < lda && i < ldb ; 
-        i += WMMA_K) 
-    {
-        Tensor tensorA = Tensor.loadF16(matrixA, aRow,
-                i, lda, shape);
-        Tensor tensorB = Tensor.loadF16(matrixB, i,
-                bCol, ldb, shape);
+    int bCol = warpN * WMMA_N;
+    for (int i = 0;
+         i < size && aRow < size && bCol < size;
+         i += WMMA_K) {
+        Tensor tensorA = Tensor.loadF16(matrixA,
+                aRow, i, lda, shape);
+        Tensor tensorB = Tensor.loadF16(matrixB,
+                i, bCol, ldb, shape);
         acc = Tensor.mma(tensorA, tensorB, acc);
     }
     int cRow = warpM * WMMA_M;
     int cCol = warpN * WMMA_N;
-    if (cRow < lda && cRow < ldc) {
+    if (cRow < size && cCol < size) {
         Tensor.store(matrixC, cRow, cCol, acc, ldc);
     }
 }
@@ -523,51 +559,49 @@ public static void mxmTensor(@RO KernelContext kc,
 And, if we emit the generated CUDA code by the HAT compiler, we obtain
 the following CUDA C++ kernel:
 
-```java
-HAT_KERNEL
-
-HAT_KERNEL void mxmTensorsColumnMajor(
+```cpp
+HAT_KERNEL void hatTensors(
     HAT_GLOBAL_MEM KernelContext_t* kc,
     HAT_GLOBAL_MEM F16Array_t* matrixA,
     HAT_GLOBAL_MEM F16Array_t* matrixB,
     HAT_GLOBAL_MEM F32Array_t* matrixC,
     int size
 ){
-    int SHAPE = 16;
-    int WMMA_M = SHAPE;
-    int WMMA_N = SHAPE;
-    int WMMA_K = SHAPE;
+    int sizeShape = 16;
+    int WMMA_M = sizeShape;
+    int WMMA_N = sizeShape;
+    int WMMA_K = sizeShape;
     int warpM = HAT_GIX/32;
     int warpN = HAT_GIY;
-    int lda = 1024;
-    int ldb = 1024;
-    int ldc = 1024;
+    int lda = size;
+    int ldb = size;
+    int ldc = size;
     nvcuda::wmma::fragment<
-        nvcuda::wmma::accumulator, 16, 16, 16, float> acc;
+         nvcuda::wmma::accumulator, 16, 16, 16, float> acc;
     nvcuda::wmma::fill_fragment(acc,0.0);
+    nvcuda::wmma::fragment<
+         nvcuda::wmma::matrix_a, 16, 16, 16, half,
+         nvcuda::wmma::row_major> tensorA;
+    nvcuda::wmma::fragment
+         <nvcuda::wmma::matrix_b, 16, 16, 16, half,
+         nvcuda::wmma::row_major> tensorB;
     int aRow = warpM*WMMA_M;
     int bCol = warpN*WMMA_N;
-    nvcuda::wmma::fragment<
-        nvcuda::wmma::matrix_a, 16, 16, 16, half,
-        nvcuda::wmma::col_major> tensorA;
-    nvcuda::wmma::fragment<
-        nvcuda::wmma::matrix_b, 16, 16, 16, half,
-        nvcuda::wmma::col_major> tensorB;
-    for(int i = 0; i<size && i<lda && i<ldb; i=i+WMMA_K){
+    for(int i = 0;
+        i < size && aRow < size && bCol < size; 
+        i=i+WMMA_K) {
         nvcuda::wmma::load_matrix_sync(tensorA,
-            (half*)matrixA->array + aRow+(i*lda),lda);
+              (half*)matrixA->array + i+(aRow*lda),lda);
         nvcuda::wmma::load_matrix_sync(tensorB,
-            (half*)matrixB->array + i+(bCol*ldb),ldb);
+              (half*)matrixB->array + bCol+(i*ldb),ldb);
         nvcuda::wmma::mma_sync(acc,tensorA,tensorB,acc);
     }
     int cRow = warpM*WMMA_M;
     int cCol = warpN*WMMA_N;
-    if(cRow<lda && cCol<ldc){
-        nvcuda::wmma::store_matrix_sync(
-            matrixC->array + cRow+(cCol*ldc),
-            acc,
-            ldc,
-            nvcuda::wmma::mem_col_major);
+    if (cRow < size && cCol < size) {
+      nvcuda::wmma::store_matrix_sync(
+          matrixC->array + cCol+(cRow*ldc),
+          acc,ldc,nvcuda::wmma::mem_row_major);
     }
     return;
 }
@@ -583,7 +617,7 @@ under the `hat/tensors/v2` branch.
   yes, we have iterated this API a couple of times already ;-).
 
 Before we show the performance impact of this API from the Java/HAT level,
-there is another component in the API that we haven't described it yet, the
+there is another component in the API that we haven't described yet, the
 warp-size and how to launch the kernel on the GPU. Let's now describe it
 and analyze how we can make it portable across different programming models.
 
@@ -596,30 +630,31 @@ thread-index and the warp-size:
 int warpM = kc.gix / kc.wrs; // warp-size usage 1st dim
 ```
 
-But, what does this mean? As explained in the NVIDIA GPU architecture section, 
-recall that a warp is basic group of execution unit composed of a set of 
-32 consecutive threads in a lockstep.
+But, what does this mean? As explained in the NVIDIA GPU architecture section,
+recall that a warp is a basic execution unit composed of a set of  32 consecutive
+threads that run on the GPU.
 
-Furthermore, to make things a bit more complicated, different GPU vendor may 
-have a different warp size (e.g., on AMD GPUs, a wavefront – equivalent of 
-warp using the AMD terminology) is composed of a set of 64 threads. 
+Furthermore, to make things a bit more complicated, different GPU vendors may
+have a different warp size (e.g., on AMD GPUs, a wavefront – equivalent of
+warp using the AMD terminology) is composed of a set of 64 threads.
 
 However, if we want to make this code portable across vendors and
 different heterogeneous programming models we should not
-change any line of code to be able to run the application and still obtain correct
-results. Thus, we need to design the thread-dispatcher and warp assignment
+change any line of code to be able to run the application and still obtain
+correct results. Thus, we need to design the thread-dispatcher and warp assignment
 carefully within the HAT compiler and runtime.
 
 #### How do we tackle the runtime portability for Warps and Tiles?
 
 Currently, HAT exposes an API to specify the global size and local work-group
 size through the ND-Range API. We extended the ND-Range API to also include
-a tile-size, and warp sizes and modified the HAT runtime to make warps 
+a tile-size, and warp sizes and modified the HAT runtime to make warps
 portable.
 
 By portability, we mean that the generated kernel along with the runtime
-scheduling parameters must be functionally correct across the supported platforms. 
-We will still have the opportunity to tune the ND-range if needed, but this 
+scheduling parameters must be functionally correct across the supported
+platforms.
+We will still have the opportunity to tune the ND-range if needed, but this
 should not be an obstacle to obtain correct functionality.
 
 Introducing a warp-size construct in the HAT API that can change value at
@@ -676,10 +711,13 @@ For the CUDA backend:
 ndRange = [ ((size / tileSize) * warpSize), (size / tileSize) ]
 ```
 
-This convention may not cover every possible scheduling strategy,
-but it gives HAT a portable default that launches the correct number of threads
-for each backend without requiring source-code changes, thus, achieving
-functional portability.
+This conversion requires an input size to be multiple of tile-size. 
+Otherwise, the HAT runtime will launch a runtime exception. 
+
+Furthermore, the calculation of the new `ndrange` may not cover 
+every possible scheduling strategy, but it gives HAT a portable default 
+that launches the correct number of threads for each backend without 
+requiring source-code changes, thus, achieving functional portability.
 
 **But how is the `warp-size` recalculated?** In this case, the value of the
 warp-size coded in HAT kernel is automatically calculated and inserted
@@ -687,16 +725,16 @@ directly into the tree of the original code model. Currently, this
 is implemented as a new `Op` that is contained in dialect for tensors
 within the HAT code transformer.
 
-A dialect is a domain specific code model without modifying the core 
-Java code models. It can be seen as an extension for a specific 
-domain of applications, in our case, for tensors. 
+A dialect is a domain-specific code model without modifying the core
+Java code models. It can be seen as an extension for a specific
+domain of applications, in our case, for tensors.
 
-A detailed discussion of tensor dialects is beyond the scope of 
-this article; however, we may cover this topic in a dedicated 
+A detailed discussion of tensor dialects is beyond the scope of
+this article; however, we may cover this topic in a dedicated
 article in the future.
 
-Thus, for instance, for the following kernel code that access
-the warp size:
+Thus, for instance, the following code snippet shows how to access
+the warp size and compute the right warp-thread index:
 
 ```java
 int warpM = kc.gix / kc.wrs; // warp-size usage 1st dim
@@ -705,10 +743,12 @@ int warpN = kc.giy;
 
 The `kc.wrs` becomes a constant value of 32 during code specialization when
 compiling for NVIDIA architectures. In the case of OpenCL, we might choose
-a value of 1 if OpenCL < 1.2 is selected as a target device, or any other 
-value that matches the current architecture in which the kernel will be deployed.
+a value of 1 if OpenCL 1.2 or older is selected as a target device, or any other
+value that matches the current architecture in which the kernel will be
+deployed.
 
-Thus, for instance, the resulting code when selecting the CUDA backend looks as follows:
+Thus, for instance, the resulting code when selecting the CUDA backend looks as
+follows:
 
 ```cpp
 int warpM = kc.gix / 32; 
@@ -716,10 +756,11 @@ int warpN = kc.giy;
 ```
 
 Thus, the `warpM` value is selected using the global thread-id of the first
-dimension divided by 32 threads within a warp, while the `warpN` value is 
-set to the thread-id of the second dimension. 
-Recall that, with the underlying CUDA and OpenCL programming models that HAT tackles,
-developers can launch a multidimensional grid of threads of up to 3D, 
+dimension divided by 32 threads within a warp, while the `warpN` value is
+set to the thread-id of the second dimension.
+Recall that, with the underlying CUDA and OpenCL programming models that HAT
+tackles,
+developers can launch a multidimensional grid of threads of up to 3D,
 facilitating the mapping between thread-indexing and data.
 
 ## Enabling Compiler and Runtime Device Portability for HAT
@@ -728,8 +769,9 @@ So far we have explained how we map the Tensor API to achieve tensor
 instructions. But, how do we make it portable for devices that do not
 have explicit tensor instructions?
 
-Note that one of the main goals in HAT is not to define vendor-specific interfaces, 
-but rather to provide abstractions that can be mapped to different architecture, 
+Note that one of the main goals in HAT is not to define vendor-specific
+interfaces,
+but rather to provide abstractions that can be mapped to different architecture,
 hardware accelerators and programming models.
 
 To enable functional portability, we represent tensors as loop-tiles. Tensor
@@ -743,7 +785,8 @@ to target tensor operations, such as for Intel extensions for subgroups:
 - [Intel OpenCL Subgroups](https://registry.khronos.org/OpenCL/extensions/intel/cl_intel_subgroups.html)
 
 While this is a possible and a promising way to match tensor operations to other
-hardware, what we want initially is to keep a generic reference implementation in which
+hardware, what we want initially is to keep a generic reference implementation
+in which
 we can guarantee that we can run the corresponding HAT programs with older
 hardware/support for OpenCL (e.g., OpenCL subgroups were promoted to core in
 OpenCL 2.1, but platforms such as Apple Silicon only support OpenCL 1.2).
@@ -762,12 +805,12 @@ can be offloaded to the following code using loop tiles:
 int aRow = warpM * WMMA_M;
 for (int m = 0; m < WMMA_M; m++) {
     int rowA = aRow + m;
-    for (int n = 0; n < WMMA_N; n++) {
+    for (int n = 0; n < WMMA_K; n++) {
         int colA = aCol + n;
-        int idxA = rowA + colA * lda;
+        int idxA = rowA  * lda + colA;
         HAT_GLOBAL_MEM F16Impl_t* ha = &matrixA->array[idxA];
         F16_t r = (F16_t){ha->value};
-        a_frag[m * WMMA_M + n] = r;
+        a_frag[m * WMMA_K + n] = r;
     }
 }
 ```
@@ -779,7 +822,7 @@ for (int m = 0; m < WMMA_M; m++) {
     int rowC = cRow + m;
     for (int n = 0; n < WMMA_N; n++) {
         int colC = cCol + n;
-        int idxC = rowC + colC * ldc;
+        int idxC = rowC  * ldc + colC;
         matrixC->array[idxC] = acc[m][n];
     }
 }
@@ -788,12 +831,12 @@ for (int m = 0; m < WMMA_M; m++) {
 The `mma` operation is mapped as follows:
 
 ```c
-for (int m = 0; m < TILE_SIZE_M; m++) {
-    for (int n = 0; n < TILE_SIZE_N; n++) {
+for (int m = 0; m < WMMA_M; m++) {
+    for (int n = 0; n < WMMA_N; n++) {
         float sum = acc[m][n];
         for (int k = 0; k < WMMA_K; k++) {
-            F16_t ha = a_frag[m * TILE_SIZE_M + k];
-            F16_t hb = b_frag[k * TILE_SIZE_N + n];
+            F16_t ha = a_frag[m * WMMA_K + k];
+            F16_t hb = b_frag[k * WMMA_N + n];
             F16_t result = (F16_t){(ha.value * hb.value)};
             sum += (float)(result.value);
         }
@@ -803,12 +846,12 @@ for (int m = 0; m < TILE_SIZE_M; m++) {
 ```
 
 The `tensor` and `accumulator` arrays are mapped to the accelerator’s private
-memory. Each accelerator thread processes a small tile: it loads tiles from 
-global memory into private memory, performs the MMA operation locally, and 
+memory. Each accelerator thread processes a small tile: it loads tiles from
+global memory into private memory, performs the MMA operation locally, and
 stores the resulting tile back to global memory.
 
-The next question is how does HAT perform for the CUDA backend targeting CUDA 
-Tensors as well as an OpenCL backend for processing tensor operation as tiles? 
+The next question is how does HAT perform for the CUDA backend targeting CUDA
+Tensors as well as an OpenCL backend for processing tensor operation as tiles?
 The following section tackles performance evaluation of this approach.
 
 ## Performance Evaluation
@@ -826,20 +869,25 @@ Namely:
 The following table summarizes the main hardware and software components for
 each platform:
 
-| HW/SW Component       | NVIDIA A10 (24GB VRAM)                                                                                                    | Apple M4 Max Laptop                                                                                                       |
-|-----------------------|---------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
-| GPU                   | NVIDIA A10                                                                                                                | Apple M4 Max GPU                                                                                                          |
-| Programming Backend   | CUDA 13.2.78                                                                                                              | OpenCL 1.2                                                                                                                |
-| Driver Version        | 595.71.05.                                                                                                                | Apple OpenCL 1.2 1.0                                                                                                      |
-| System Memory         | 235 GB                                                                                                                    | 64 GB                                                                                                                     |
-| CPU                   | Intel Xeon Platinum 8358 CPU @ 2.60GHz                                                                                    | Apple M4 Max                                                                                                              |
-| Operating System      | Ubuntu 22.04.5 - 6.8.0-1052-oracle                                                                                        | macOS 26.3.1                                                                                                              |
-| Java Version          | 26-ea+10-1053.                                                                                                            | 26+35-2893                                                                                                                |
-| Babylon Revision      | b54f01cdbe1.                                                                                                              | b54f01cdbe1                                                                                                               |
-| HAT Backend           | CUDA                                                                                                                      | OpenCL                                                                                                                    |
-| Benchmark Application | [Main.java](https://github.com/jjfumero/babylon/blob/hat/tensors/v2/hat/examples/tensors/src/main/java/tensors/Main.java) | [Main.java](https://github.com/jjfumero/babylon/blob/hat/tensors/v2/hat/examples/tensors/src/main/java/tensors/Main.java) |
-| Input Sizes           | 512 to 4096                                                                                                               | 512 to 4096                                                                                                               |
-| Java Heap Size        | 16 GB                                                                                                                     | 16 GB                                                                                                                     |
+| HW/SW Component     | NVIDIA A10 (24GB VRAM)                 | Apple M4 Max Laptop  |
+|---------------------|----------------------------------------|----------------------|
+| GPU                 | NVIDIA A10                             | Apple M4 Max GPU     |
+| Programming Backend | CUDA 13.2.78                           | OpenCL 1.2           |
+| Driver Version      | 595.71.05.                             | Apple OpenCL 1.2 1.0 |
+| System Memory       | 235 GB                                 | 64 GB                |
+| CPU                 | Intel Xeon Platinum 8358 CPU @ 2.60GHz | Apple M4 Max         |
+| Operating System    | Ubuntu 22.04.5 - 6.8.0-1052-oracle     | macOS 26.3.1         |
+| Java Version        | 26-ea+10-1053.                         | 26+35-2893           |
+| HAT Backend         | CUDA                                   | OpenCL               |
+
+Common setup for both machines:
+
+| Component             | Value                                                                                                                     | 
+|-----------------------|---------------------------------------------------------------------------------------------------------------------------|
+| Babylon Revision      | [b54f01cdbe1](https://github.com/jjfumero/babylon/commit/b54f01cdbe162578ce7592d1a996099c0fc51269)                        |
+| Benchmark Application | [Main.java](https://github.com/jjfumero/babylon/blob/hat/tensors/v2/hat/examples/tensors/src/main/java/tensors/Main.java) | 
+| Input Sizes           | 512 to 4096                                                                                                               | 
+| Java Heap Size        | 16 GB                                                                                                                     | 
 
 Note that the GPU A10 is running in an instance from Oracle Cloud (OCI).
 The instance is a paravirtualized VM with 15 CPU cores assigned.
@@ -850,12 +898,17 @@ FP32 (float) values; c) the Java/HAT naïve matrix multiplication using FP16 (
 half) values, and d) the naïve matrix multiply implemented using the proposed
 Tensor API for HAT.
 
-We run each benchmark 100 times and collected the last 50 runs for the report.
+For our experiments, we use the column-major version, as it was the default 
+option from the CUDA C++ explained in the [original NVIDIA blog post](https://developer.nvidia.com/blog/programming-tensor-cores-cuda-9/).
+
+We ran each benchmark 100 times, collected the last 50 runs and report the 
+average and standard-deviation.
 Furthermore, we set the Java heap size to 16 GB. We also run the benchmark for
 four different sizes, ranging from 512x512 matrices to 4kx4k matrices. The
 following code snippet shows how this benchmark has been evaluated:
 
 ```bash
+## Use "ffi-cuda" for the CUDA backend
 backend="ffi-opencl"
 timestamp=`date "+%a-%b-%d-%I-%M-%S-%p-%Y"`
 directory="tensorResults_$timestamp"
@@ -878,11 +931,12 @@ hardware via the CUDA backend. The following performance graph shows the
 speedups of each version, namely naïve matrix multiplication in FP32 and FP16
 respectively, and the naïve matrix multiplication implemented using the HAT
 Tensor API. All these versions are compared to the Java parallel stream
-implementation evaluated on the Intel Xeon Platinum 8358 with 16 CPU cores.
-Furthermore, the following performance graph reports end-to-end time in peak
-performance (after warm up), including data transfers (copy data from the CPU to
-the GPU, matrix-multiplication processing, and copy data from the GPU to the
-CPU).
+implementation evaluated on the Intel Xeon Platinum 8358 with 15 CPU physical
+cores.
+Furthermore, the following performance graph reports the speedup computed 
+from end-to-end time after warm up, 
+including data transfers (copy data from the CPU to the GPU, matrix-multiplication 
+processing, and copy data from the GPU to the CPU).
 
 <p align="center">
 <img src="./plots/perf-a10-e2e.png" width="600"/>
@@ -890,9 +944,9 @@ CPU).
 
 
 We can see that the HAT tensor implementation performs up to 2200 times faster
-compared to Java Parallel streams running on the Intel Xeon Platinum (16 cores),
-and it is consistently faster for all data points compared to the naïve
-implementations in FP16 and FP32 respectively.
+compared to Java Parallel streams running on the Intel Xeon Platinum 
+(15 CPU physical cores), and it is consistently faster for all data points 
+compared to the naïve implementations in FP16 and FP32 respectively.
 
 ## Kernel Performance Profiled with NCU
 
@@ -915,8 +969,9 @@ evaluation of the CUDA C++ versions.
 </p>
 
 As we can see, the `mxmTensorCM` kernel takes ~0.35 ms, which is 4% slower
-compared to the equivalent CUDA C++ WMMA kernel implementation for this 
-data type that we saw in Section [How Fast can we Process MMA Operations with Tensor Cores?](#how-fast-can-we-process-mma-operations-with-tensor-cores).
+compared to the equivalent CUDA C++ WMMA kernel implementation for this
+data type that we saw in
+Section [How Fast can we Process MMA Operations with Tensor Cores?](#how-fast-can-we-process-mma-operations-with-tensor-cores).
 
 ### But why doesn’t it run at the same speed as CUDA Native?
 
@@ -959,7 +1014,7 @@ we find the following description:
 > pointing to the first element of the matrix in memory.
 
 
-This means we need 32-byte alignment for the inputs F16Array arrays.
+This means we need 32-byte alignment for the inputs `F16Array` arrays.
 
 ```diff
 --- a/hat/core/src/main/java/hat/buffer/F16Array.java
@@ -973,7 +1028,8 @@ This means we need 32-byte alignment for the inputs F16Array arrays.
                       half -> half.fields("value")));
 ```
 
-After applying the alignment, we now obtain the following report from the Speed-of-Light section:
+After applying the alignment, we now obtain the following report from the
+Speed-of-Light section:
 
 <p align="center">
 <img src="./ncu-profilers/comparison-alignment/ncu-hat-aligned-vs-cuda.png" width="600"/>
@@ -986,8 +1042,8 @@ that now runs 0.85% slower, producing equivalent CUDA kernels.
 
 If we benchmark the different versions and input sizes with the NCU, we can
 compare the kernel quality across the different versions. The following Figure
-shows the GFLOP/s (the higher, the better) for each version, including the CUDA 
-C++ WMMA and cuBLAS versions. In this case, the HAT version for tensors does 
+shows the GFLOP/s (the higher, the better) for each version, including the CUDA
+C++ WMMA and cuBLAS versions. In this case, the HAT version for tensors does
 not include alignment.
 
 <p align="center">
@@ -1004,7 +1060,7 @@ set to 32 bytes for the input F16Array types.
 <img src="./plots/perf-cuda-a10-ncu-aligned.png" width="600"/>
 </p>
 
-As we can see, HAT achieves up to 7.4 TFLOP/s. The CUDA C++ and the HAT
+As we can see, HAT achieves up to 7.3 TFLOP/s. The CUDA C++ and the HAT
 generated tensor kernel achieve, in this case, the same performance, as we
 discussed earlier. The highest performance is achieved when running the CUDA
 cuBLAS version, by a factor of 3-7x faster. However, let’s keep in mind that the
@@ -1015,10 +1071,11 @@ still has plenty of room for improvements.
 
 The following performance plot shows the speedups of each version compared to
 the Java Parallel Streams evaluated on the CPU (the higher, the better) when
-running on the Apple M4 MAX GPU. The x-axis shows the input data size (matrix sizes), 
-and the y-axis shows the speedup. For this version, we use a default value of 
-a local group size (`Local.of` from the HAT API) of 128x4 threads, and a tile 
-size of 16 elements. We initially choose these values as they were the default 
+running on the Apple M4 MAX GPU. The x-axis shows the input data size (matrix
+sizes),
+and the y-axis shows the speedup. For this version, we use a default value of
+a local group size (`Local.of` from the HAT API) of 128x4 threads, and a tile
+size of 16 elements. We initially choose these values as they were the default
 ones when running with the CUDA backend.
 
 <p align="center">
@@ -1027,13 +1084,12 @@ ones when running with the CUDA backend.
 
 Using explicit tile processing does not automatically improve performance.
 In this experiment, the tensor version improves performance for the 1k and 2k
-matrix sizes,
-but it is slower than the naïve matrix multiplication for the smallest and
-largest sizes, and slightly faster for the rest of the input sizes.
+matrix sizes, but it is slower than the naïve matrix multiplication for the
+smallest and largest sizes (512x512 and 4kx4k).
 
 But, why is it slower? One important performance factor to keep in mind when
-running applications on GPUs is the selection of the group size and the 
-tile size. This can influence performance, even if the application is 
+running applications on GPUs is the selection of the group size and the
+tile size. This can influence performance, even if the application is
 suitable for acceleration.
 
 Thus, what we might need to do on many occasions is to tune the group size and
@@ -1062,9 +1118,16 @@ obtain the following performance graph:
 </p>
 
 With these parameters, the automatic loop-tiled implementation improves by up to
-9x compared to the previous configuration. It becomes the fastest version across 
-all evaluated input sizes and reaches more than 1000x speedup over the CPU 
-parallel-stream implementation. The results were also validated for correctness.
+9x compared to the previous configuration using the Tensor API. 
+It becomes the fastest version across all evaluated input sizes and reaches 
+more than 1000x speedup over the CPU parallel-stream implementation. 
+Furthermore, it improves the naïve matrix-multiplication (without tensors) by 8x.
+
+Since we reran the entire experiment across all versions and input data sizes,
+some fluctuations are visible even in the baseline implementations. It is also
+worth noting that the experiments were run on an Apple M4 Max MacBook laptop
+without isolation, so interference from other applications may have affected the
+measurements. 
 
 The main takeaway is that the HAT compiler and runtime can compile and launch an
 equivalent application by mapping tensors to explicit tiles, and with some
@@ -1078,19 +1141,18 @@ multiplication.
 In this article, we have explained how to enable Tensor Core computation for
 NVIDIA GPUs from Java using the Project Babylon and HAT. Furthermore, we have
 explained how to make the proposed representation portable across different
-backends, by explicitly computing tensors as tiles, given the option to execute
-tensors with different shapes using programming models and accelerators that
-lack of such execution units for matrix-multiply and accumulate accelerations.
+backends, by explicitly mapping tensors via loop-tiles, given the option to 
+execute tiles with different shapes using programming models and accelerators that
+lack specific instructions and/or functional units for matrix-multiply and 
+accumulate.
 
-We have shown the performance that is possible to achieve on an NVIDIA A10
-and on Apple M4 Max GPUs. For the NVIDIA platform, we showed that the
-performance matches with the equivalent CUDA C++ execution, achieving up to 7.3
-TFLOP/s for the naïve matrix multiplication expressed with the HAT Tensor API,
-matching the performance with its equivalent CUDA C++ implementation.
-
-Furthermore, we have shown that, with a bit of tuning, performance of the whole
-application improves by 9x compared to the execution of the kernel without the
-Tensor API enabled.
+We evaluated our approach for two supported backends in HAT (CUDA and OpenCL) and 
+two computing systems, one for NVIDIA and another one for Apple Silicon with OpenCL. 
+For the NVIDIA/CUDA platform we used an A10 GPU, in which we showed that the
+performance of HAT matches with the equivalent CUDA C++ version, achieving up to 7.3
+TFLOP/s. The second platform used was an Apple M4 MAX GPU laptop, in which we show that, 
+with a bit of tuning, performance of the whole application improves by 8x compared 
+to the naïve matrix multiplication without the tensor API.
 
 The main conclusion is that with the Project Babylon and code reflection, it is
 possible to model portable Java applications to target hardware accelerators
@@ -1110,13 +1172,21 @@ The Tensor API implementation for HAT is fully available on GitHub:
 
 ### How to run the Java Benchmark
 
+For OpenCL: 
+
 ```bash
 java @hat/run ffi-opencl tensors --iterations=100 --verbose --size=1024 --check
 ```
 
+For CUDA:
+
+```bash
+java @hat/run ffi-cuda tensors --iterations=100 --verbose --size=1024 --check
+```
+
 ### Show Performance Numbers
 
-The benchmark stores a csv table in the local directory:
+The benchmark stores a CSV table in the local directory:
 
 ```bash
 cat table-tensors-1024.csv
@@ -1124,6 +1194,14 @@ cat table-tensors-1024.csv
 
 ### Show the Generated Code
 
+For OpenCL: 
+
 ```bash
 HAT=SHOW_CODE java @hat/run ffi-opencl tensors --iterations=100 --verbose --size=1024 --check
+```
+
+For CUDA:
+
+```bash
+HAT=SHOW_CODE java @hat/run ffi-cuda tensors --iterations=100 --verbose --size=1024 --check
 ```
