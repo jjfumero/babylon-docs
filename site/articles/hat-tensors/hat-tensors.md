@@ -427,11 +427,32 @@ var shape = Tensor.shape(sizeShape, sizeShape, sizeShape);
 Tensor acc = Tensor.zeros(shape, float.class);
 ```
 
+In the current implementation, HAT does not choose the tensor shape automatically.
+The programmer selects a shape that best matches the backend, target device and 
+data types used. 
+
+For the CUDA backend, the selected shape must map to one of the [WMMA fragment
+sizes supported for the operand and accumulator types](https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#element-types-and-matrix-sizes).
+
+For the OpenCL backend, tensors are lowered to explicit per-work-item tiles 
+(as we will discuss shortly) in private memory. Larger shapes can increase 
+private register pressure, and can lead to register spilling or 
+even compile/launch failures on some devices and drivers. 
+For instance, using `shapeSize = 16` may fail on NVIDIA GPUs through the
+OpenCL backend, while reducing it to `shapeSize = 4` can compile and run. 
+Other platforms, such as Apple Silicon and Intel Integrated Graphics, may 
+accept the larger shape, although tuning can still improve performance.
+
+A more viable solution in the longer run would be to select a shape size via a 
+`PREFERRED_SHAPE_SIZE`, and let the HAT runtime/compiler to automatically select
+the best fit for the targeted backend/architectures. This feature is currently 
+being discussed on [GitHub](https://github.com/openjdk/babylon-docs/pull/20#discussion_r3372431807).
+
 ### 2. For each of the tiles (from 0 to num-tiles)
 
-Each thread iterates over the tiles. In our example, each tile is of size
-`WMMA_K`. Each tile loads the input data in tensors and performs the 
-`mma` operation.
+The next step is to iterate over the tiles, load the input matrices 
+into tensors and perform the `mma` operation.  In our example, each 
+tile is of size `WMMA_K`. 
 
 ```java
 final int WMMA_K = 16;
