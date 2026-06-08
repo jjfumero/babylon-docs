@@ -44,7 +44,7 @@ an [NVIDIA Ampere A10 GPU](https://www.nvidia.com/content/dam/en-zz/Solutions/Da
 We show that, by enabling tensor cores on supported hardware (NVIDIA), we
 can speed up the naïve matrix multiplication kernel from 240 GFLOP/s to 7.3 TFLOP/s,
 while the application remains portable to run on Apple M4 GPU via OpenCL 1.2, 
-in which, with some parameter tuning, we can increase performance by 8x 
+where with some parameter tuning, we can increase performance by 8x 
 over the naïve matrix-multiplication.
 
 **Disclaimer**: this article shows an approach to extend the HAT programming
@@ -130,7 +130,7 @@ Each processing block contains a large register file (for example, the NVIDIA
 B200 GPU contains more than 16k private registers). This is private space
 for the CUDA threads that run inside the processing block. Furthermore,
 the processing block contains a big set of functional units for computing
-floating point operations in 32-bits, and
+floating point operations in 32-bit, and
 integers of 32 bits. These represent the common CUDA cores that NVIDIA
 advertises. Each GPU tier and GPU generation varies in the number of CUDA cores
 per processing block. For instance, the NVIDIA Blackwell microarchitecture
@@ -382,7 +382,7 @@ of code-reflection.**
 For the memory access layout, while we can make it explicit,
 we can facilitate its accessor by making a row-major layout the default
 option, as it is also how other programming models and languages use
-by default, such as C, NumPy and Java. In case HAT developer need
+by default, such as C, NumPy and Java. In case HAT developers need
 to access using column-major layout, we can pass an extra parameter
 when we define the tensor.
 
@@ -410,7 +410,7 @@ Note that WMMA fragments in CUDA are mutable objects. However, in our model,
 we assume tensors are immutable, at least at the API level in HAT.
 While this eases programmability, the HAT runtime and compiler are still free to
 reorganize those operations to better match the underlying programming model
-(e.g., CUDA and OpenCL). As follows, we will explain the details of how HAT
+(e.g., CUDA and OpenCL). Next, we will explain the details of how HAT
 exposes these operations for Java programmers.
 
 ### 1. Declare Tensor Accumulator in HAT
@@ -708,7 +708,7 @@ For the CUDA backend:
 ndRange = [ ((size / tileSize) * warpSize), (size / tileSize) ]
 ```
 
-This conversion requires an input size to be multiple of tile-size. 
+This conversion requires an input size to be a multiple of tile-size. 
 Otherwise, the HAT runtime will launch a runtime exception. 
 
 The calculation of the new `ndrange` may not cover every possible scheduling 
@@ -919,7 +919,7 @@ for s in ${inputSize[@]}; do
 done
 ```
 
-Each run generates a `csv`table with all timers. Those timers
+Each run generates a `csv` table with all timers. Those timers
 were used to plot the end-to-end performance. For the kernel 
 performance, we use the NVIDIA NCU profiler.
 
@@ -1060,7 +1060,7 @@ As we can see, HAT achieves up to 7.3 TFLOP/s. The CUDA C++ and the HAT
 generated tensor kernel achieve, in this case, the same performance, as we
 discussed earlier. The highest performance is achieved when running the CUDA
 cuBLAS version, by a factor of 3-7x faster. However, let’s keep in mind that the
-cuBLAS implementation is optimized, while our initial version with tensor
+cuBLAS implementation is optimized, while our initial tensor version 
 still has plenty of room for improvements.
 
 ### Performance on Apple M4 Max GPU with OpenCL 1.2 and Explicit Tiles
@@ -1137,18 +1137,16 @@ multiplication.
 In this article, we have explained how to enable Tensor Core computation for
 NVIDIA GPUs from Java using the Project Babylon and HAT. Furthermore, we have
 explained how to make the proposed representation portable across different
-backends, by explicitly mapping tensors via loop-tiles in OpenCL, given the 
-option to execute tiles with different shapes using programming models and 
-accelerators that lack specific instructions and/or functional units for 
-matrix-multiply and accumulate.
+backends, by explicitly mapping tensors to loop tiles in OpenCL, allowing tile 
+execution on accelerators that lack dedicated MMA units.
 
 We evaluated our approach for two supported backends in HAT (CUDA and OpenCL) and 
 two computing systems, one for NVIDIA and another one for Apple Silicon with OpenCL. 
 For the NVIDIA/CUDA platform we used an A10 GPU, in which we showed that the
-performance of HAT matches with the equivalent CUDA C++ version, achieving up to 7.3
-TFLOP/s. The second platform used was an Apple M4 MAX GPU laptop, in which we show that, 
-with a bit of tuning, performance of the whole application improves by 8x compared 
-to the naïve matrix multiplication without the tensor API.
+performance of HAT matches with the equivalent CUDA C++ version, achieving up to 
+7.3 TFLOP/s. The second platform used was an Apple M4 MAX GPU laptop, in which we 
+show that, with a bit of tuning, performance of the whole application improves by 
+8x compared to the naïve matrix multiplication without the tensor API.
 
 The main conclusion is that with the Project Babylon and code reflection, it is
 possible to model portable Java applications to target hardware accelerators
